@@ -95,5 +95,8 @@ def process_vehicle_entry(data: VehicleEntryRequest, background_tasks: Backgroun
         raise HTTPException(status_code=500, detail=f"Failed to bind operational framework layers: {str(e)}")
 
 
+
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    # This allows Render to tell your app which port to use
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
