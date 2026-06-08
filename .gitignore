@@ -1,0 +1,26 @@
+# Python bytecode and caches
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+
+# Virtual Environments (do not commit your venv folder!)
+venv/
+.venv/
+env/
+
+# Environment files and secrets
+.env
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Large Model files (These are often too big for GitHub)
+*.pt
+*.pth
+
+# OS-specific files
+.DS_Store
+Thumbs.db
