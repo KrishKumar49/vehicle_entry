@@ -56,23 +56,49 @@ logging.basicConfig(
 if not os.path.isfile(DETECTION_MODEL_PATH):
     raise FileNotFoundError(f"Vehicle detection model not found: {DETECTION_MODEL_PATH}")
 
-detector = YOLO(DETECTION_MODEL_PATH)
-
+detector = None
 cfg = None
 predictor = None
 
-if get_cfg is not None and DefaultPredictor is not None:
-    cfg = get_cfg()
-    if os.path.isfile(REID_CONFIG_PATH):
-        cfg.merge_from_file(REID_CONFIG_PATH)
-        cfg.MODEL.WEIGHTS = REID_WEIGHTS_PATH
-        cfg.MODEL.DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-        if os.path.isfile(cfg.MODEL.WEIGHTS):
-            predictor = DefaultPredictor(cfg)
-        else:
-            logger.warning("FastReID checkpoint not found at %s; vehicle embeddings will be skipped", cfg.MODEL.WEIGHTS)
-    else:
-        logger.warning("FastReID config not found at %s; vehicle embeddings will be skipped", REID_CONFIG_PATH)
+def get_detector():
+    global detector
+    if detector is None:
+        logger.info("Loading YOLOv8 detection model from %s", DETECTION_MODEL_PATH)
+        detector = YOLO(DETECTION_MODEL_PATH)
+    return detector
+        
+
+def get_predictor():
+    global predictor, cfg
+    if predictor is None and get_cfg is not None and DefaultPredictor is not None:
+            logger.info("Loading FastReID re-identification model from %s with config %s", REID_WEIGHTS_PATH, REID_CONFIG_PATH)
+            
+            cfg = get_cfg()
+            
+            if os.path.isfile(REID_CONFIG_PATH):
+                cfg.merge_from_file(REID_CONFIG_PATH)
+                cfg.MODEL.WEIGHTS = REID_WEIGHTS_PATH
+                cfg.MODEL.DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+                
+                if os.path.isfile(cfg.MODEL.WEIGHTS):
+                    predictor = DefaultPredictor(cfg)
+                else:
+                    logger.warning("FastReID checkpoint not found at %s; vehicle embeddings will be skipped", cfg.MODEL.WEIGHTS)
+                    
+    return predictor
+
+# if get_cfg is not None and DefaultPredictor is not None:
+#     cfg = get_cfg()
+#     if os.path.isfile(REID_CONFIG_PATH):
+#         cfg.merge_from_file(REID_CONFIG_PATH)
+#         cfg.MODEL.WEIGHTS = REID_WEIGHTS_PATH
+#         cfg.MODEL.DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+#         if os.path.isfile(cfg.MODEL.WEIGHTS):
+#             predictor = DefaultPredictor(cfg)
+#         else:
+#             logger.warning("FastReID checkpoint not found at %s; vehicle embeddings will be skipped", cfg.MODEL.WEIGHTS)
+#     else:
+#         logger.warning("FastReID config not found at %s; vehicle embeddings will be skipped", REID_CONFIG_PATH)
 
 transform = T.Compose([
     T.ToPILImage(),
@@ -86,7 +112,8 @@ transform = T.Compose([
 
 
 def get_vehicle_embedding(crop):
-    if predictor is None or crop is None or crop.size == 0:
+    predictor_instance = get_predictor()
+    if predictor_instance is None:
         return None
 
     crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
@@ -94,7 +121,7 @@ def get_vehicle_embedding(crop):
     tensor = tensor.unsqueeze(0).to(cfg.MODEL.DEVICE)
 
     with torch.no_grad():
-        embedding = predictor.model({"images": tensor})
+        embedding = predictor_instance.model({"images": tensor})
 
     embedding = embedding.cpu().numpy().flatten()
     norm = np.linalg.norm(embedding)
@@ -127,6 +154,7 @@ def start_live_vehicle_entry(
         logger.error("Could not open video source %s", source)
         return
 
+    det = get_detector()
     logger.info("Processing source with ByteTrack: %s", source)
     resolved_visit_id = _resolve_visit_id(employee_id, visit_id)
     if persist and not resolved_visit_id:
@@ -195,7 +223,7 @@ def start_live_vehicle_entry(
 
         try:
             # 🚀 Native Ultralytics ByteTrack invocation
-            results = detector.track(frame, persist=True, tracker="bytetrack.yaml", verbose=False)[0]
+            results = det.track(frame, persist=True, tracker="bytetrack.yaml", verbose=False)[0]
             
             if results.boxes is not None and results.boxes.id is not None:
                 box_ids = results.boxes.id.int().cpu().tolist()

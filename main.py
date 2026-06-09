@@ -74,7 +74,7 @@ def process_vehicle_entry(data: VehicleEntryRequest, background_tasks: Backgroun
         background_tasks.add_task(
             start_live_vehicle_entry,
             source=data.source,
-            frame_skip=5,
+            # frame_skip=5,
             max_frames=None,  # None removes limits so the engine streams endlessly
             show_window=False,
             persist=True,
