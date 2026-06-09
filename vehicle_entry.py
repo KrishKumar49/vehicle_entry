@@ -16,13 +16,13 @@ if FASTREID_PATH not in sys.path:
 
 import collections
 import collections.abc
+from threading import Lock
 if not hasattr(collections, "Mapping"):
     collections.Mapping = collections.abc.Mapping
 
 BASE_DIR = os.path.dirname(__file__)
 from download_models import ensure_vehicle_model_assets
 
-ensure_vehicle_model_assets()
 
 from ultralytics import YOLO
 import torchvision.transforms as T
@@ -59,32 +59,44 @@ if not os.path.isfile(DETECTION_MODEL_PATH):
 detector = None
 cfg = None
 predictor = None
+predictor_lock = Lock()
 
 def get_detector():
     global detector
     if detector is None:
+        ensure_vehicle_model_assets()
+
         logger.info("Loading YOLOv8 detection model from %s", DETECTION_MODEL_PATH)
         detector = YOLO(DETECTION_MODEL_PATH)
     return detector
-        
 
 def get_predictor():
     global predictor, cfg
+    logger.debug("get_predictor called")
     if predictor is None and get_cfg is not None and DefaultPredictor is not None:
-            logger.info("Loading FastReID re-identification model from %s with config %s", REID_WEIGHTS_PATH, REID_CONFIG_PATH)
-            
-            cfg = get_cfg()
-            
-            if os.path.isfile(REID_CONFIG_PATH):
-                cfg.merge_from_file(REID_CONFIG_PATH)
-                cfg.MODEL.WEIGHTS = REID_WEIGHTS_PATH
-                cfg.MODEL.DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-                
-                if os.path.isfile(cfg.MODEL.WEIGHTS):
-                    predictor = DefaultPredictor(cfg)
-                else:
-                    logger.warning("FastReID checkpoint not found at %s; vehicle embeddings will be skipped", cfg.MODEL.WEIGHTS)
-                    
+        with predictor_lock:
+            if predictor is None:
+                logger.info(
+                    "Loading FastReID re-identification model from %s with config %s",
+                    REID_WEIGHTS_PATH,
+                    REID_CONFIG_PATH,
+                )
+
+                cfg = get_cfg()
+
+                if os.path.isfile(REID_CONFIG_PATH):
+                    cfg.merge_from_file(REID_CONFIG_PATH)
+                    cfg.MODEL.WEIGHTS = REID_WEIGHTS_PATH
+                    cfg.MODEL.DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+                    if os.path.isfile(cfg.MODEL.WEIGHTS):
+                        predictor = DefaultPredictor(cfg)
+                    else:
+                        logger.warning(
+                            "FastReID checkpoint not found at %s; vehicle embeddings will be skipped",
+                            cfg.MODEL.WEIGHTS,
+                        )
+
     return predictor
 
 # if get_cfg is not None and DefaultPredictor is not None:
@@ -155,7 +167,13 @@ def start_live_vehicle_entry(
         return
 
     det = get_detector()
+    pred = get_predictor()
+    logger.debug("Initialized detector and predictor")
     logger.info("Processing source with ByteTrack: %s", source)
+    
+    if pred is None:
+        logger.warning("FastReID predictor is not available; vehicle embeddings will be skipped")
+    
     resolved_visit_id = _resolve_visit_id(employee_id, visit_id)
     if persist and not resolved_visit_id:
         logger.warning("Persistence is enabled but no visit_id could be resolved.")
